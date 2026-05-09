@@ -1,17 +1,19 @@
 # 🛡️ SENTINEL - UI
 
-**SENTINEL - UI** is a Chrome Extension designed to perform superficial, rapid checks for potential **OWASP Top 10 vulnerabilities** on any given website.
+**SENTINEL - UI** is an autonomous, AI-augmented Chrome Extension engineered to perform rapid, passive heuristic analysis for potential **OWASP Top 10 vulnerabilities** on any web application.
 
-⚠️ **Disclaimer:** This tool performs *superficial heuristic checks only*. It is **not** a penetration testing tool and cannot replace comprehensive security audits.
+⚠️ **Disclaimer:** This tool utilizes *passive, observational telemetry only*. It is designed for preliminary reconnaissance and educational purposes, and is **not** a substitute for comprehensive penetration testing or active dynamic application security testing (DAST).
 
 ---
 
-## 🏗️ High-Level Structure
+## 🏗️ High-Level Architecture
 
-The extension follows the standard Chrome Extension **Manifest V3** architecture. It consists of three primary layers:
-1. **The User Interface (Popup):** Provides the input interface, initiates scans, and displays results in a modern, dark-themed UI.
-2. **The Logic Controller (Popup JS):** Acts as the bridge between the user interface and the background scanner, handling UI state and local storage.
-3. **The Background Service Worker:** Performs the actual HTTP requests and URL heuristic checks securely in the background, circumventing standard cross-origin limitations where applicable via extension APIs.
+The extension is built on a high-performance **Manifest V3** architecture. It leverages a non-intrusive, continuous monitoring pipeline consisting of three primary layers:
+
+1. **The Telemetry Engine (Content Script):** Passively extracts DOM-level indicators of compromise (IoCs)—such as exposed framework versions, missing anti-CSRF tokens, omitted SRI hashes, and sensitive HTML comments.
+2. **The Autonomous Service Worker (Background):** Triggers automatically upon page load. It analyzes URL routing parameters for IDOR/SSRF patterns and executes ultra-low-latency `HEAD` requests to validate critical security headers (e.g., CSP, HSTS).
+3. **The Terminal UI (Popup):** A highly optimized, zero-latency interface utilizing `DocumentFragment` injection. It renders findings within a sleek, cyberpunk-inspired terminal aesthetic.
+4. **The AI Uplink:** An optional integration with Google Gemini (via user-provided API key) that synthesizes raw telemetry data into an executive risk summary and provides actionable remediation steps.
 
 ---
 
@@ -20,46 +22,52 @@ The extension follows the standard Chrome Extension **Manifest V3** architecture
 ```text
 SENTINEL-UI/
 │
-├── manifest.json       # Extension configuration & permissions (Manifest V3)
-├── background.js       # Service Worker handling the core scanning logic
-├── popup.html          # UI Layout for the extension popup
-├── popup.css           # Styling for the popup (Modern Dark Theme)
-├── popup.js            # UI interaction logic and messaging bridging
+├── manifest.json       # Manifest V3 configurations & elevated permissions
+├── background.js       # Autonomous scanning engine & AI fetch pipeline
+├── content.js          # Passive DOM parser & heuristic observer
+├── popup.html          # Structural layout for the terminal UI
+├── popup.css           # Styling (Cybersecurity theme, Fira Code, neon accents)
+├── popup.js            # UI controllers, local storage sync, & AI animations
 │
 └── icons/              
-    └── icon.svg        # Custom shield icon for the extension
+    └── icon.svg        # Custom vector cyber-crest icon
 ```
 
 ---
 
-## ⚙️ Architecture & Flow Chart
+## ⚙️ Execution Flow
 
-The following diagram illustrates the data flow from the moment a user requests a scan to when the results are rendered on screen.
+The following diagram illustrates the asynchronous, autonomous data flow from page load to UI rendering and AI generation.
 
 ```mermaid
 sequenceDiagram
-    participant User
-    participant PopupUI as Popup UI (HTML/CSS)
-    participant PopupJS as Popup Logic (JS)
+    participant Browser as Target Webpage
+    participant ContentJS as DOM Observer
     participant Background as Service Worker
-    participant TargetWeb as Target Website
+    participant PopupUI as Terminal UI
+    participant GeminiAI as Google Gemini API
 
-    User->>PopupUI: Clicks "Scan" Button
-    PopupUI->>PopupJS: Trigger Scan Event
-    PopupJS->>PopupUI: Show Loading Spinner
-    PopupJS->>Background: Send {action: 'scan_url', url}
+    Browser->>Background: Tab Load Complete Event
     
-    rect rgb(30, 41, 59)
-    Background->>TargetWeb: 1. Fetch HEAD (for headers)
-    TargetWeb-->>Background: Response Headers
-    Background->>Background: 2. Analyze URL heuristics
-    Background->>Background: 3. Parse headers for security flags
+    rect rgb(10, 20, 30)
+    Background->>Browser: 1. Asynchronous HEAD Fetch (Headers)
+    Background->>Background: 2. Parse URL for risk vectors (SQLi, SSRF)
+    Background->>ContentJS: 3. Request DOM Telemetry
+    ContentJS-->>Background: Return DOM findings (Tokens, SRI, Comments)
     end
     
-    Background-->>PopupJS: Return Vulnerability Results Array
-    PopupJS->>chrome.storage: Save Results locally
-    PopupJS->>PopupUI: Hide Spinner & Render Vulnerability List
-    PopupUI-->>User: Display Results
+    Background->>Background: Aggregate findings & calculate risk severity
+    Background->>Browser: Update Extension Badge (e.g., RED '3')
+    
+    User->>PopupUI: Opens Extension
+    PopupUI->>Background: Request current state
+    Background-->>PopupUI: Return localized vulnerability matrix
+    PopupUI->>PopupUI: Render Terminal Interface (Zero-Latency)
+    
+    User->>PopupUI: Clicks "Generate AI Insights"
+    PopupUI->>GeminiAI: Dispatch telemetry payload with API Key
+    GeminiAI-->>PopupUI: Return Executive Risk Summary
+    PopupUI->>PopupUI: Stream output via Typewriter Effect
 ```
 
 ---
@@ -70,7 +78,7 @@ sequenceDiagram
 2. Open Google Chrome and navigate to `chrome://extensions/`.
 3. Enable **Developer mode** using the toggle switch in the top right corner.
 4. Click on **Load unpacked** and select the `SENTINEL-UI` directory.
-5. The extension is now installed! Click the puzzle icon in your browser to pin it to your toolbar.
+5. *(Optional)* Click the ⚙️ icon in the extension to securely add a Google AI Studio API key to enable the **AI Security Insights** engine.
 
 ---
 
