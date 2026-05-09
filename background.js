@@ -1,132 +1,213 @@
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === 'scan_url') {
-        performScan(request.url).then(results => {
-            sendResponse({ results: results });
-        });
-        return true; // Keep the message channel open for async response
+// Keep track of results per tab autonomously
+const tabResults = {};
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    // Run scan automatically when page finishes loading
+    if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome://')) {
+        runAutonomousScan(tabId, tab.url);
     }
 });
 
-async function performScan(urlString) {
+async function runAutonomousScan(tabId, urlString) {
     let url;
     try {
         url = new URL(urlString);
-    } catch (e) {
-        return generateFallbackResults();
-    }
+    } catch (e) { return; }
 
-    const results = [
-        { id: 'A01', name: 'Broken Access Control', status: 'Likely Safe' },
-        { id: 'A02', name: 'Cryptographic Failures', status: 'Likely Safe' },
-        { id: 'A03', name: 'Injection', status: 'Likely Safe' },
-        { id: 'A04', name: 'Insecure Design', status: 'Likely Safe' },
-        { id: 'A05', name: 'Security Misconfiguration', status: 'Likely Safe' },
-        { id: 'A06', name: 'Vulnerable Components', status: 'Likely Safe' },
-        { id: 'A07', name: 'Ident. & Auth Failures', status: 'Likely Safe' },
-        { id: 'A08', name: 'Software & Data Integrity', status: 'Likely Safe' },
-        { id: 'A09', name: 'Security Logging', status: 'Likely Safe' },
-        { id: 'A10', name: 'SSRF', status: 'Likely Safe' }
-    ];
+    const results = initializeResults();
+    let issueCount = 0;
+    
+    // 1. URL Heuristics (Nuanced parameters)
+    analyzeUrl(url, results);
 
-    const urlLower = url.href.toLowerCase();
-    const pathLower = url.pathname.toLowerCase();
+    // 2. Header Heuristics (Passive fetch)
+    await analyzeHeaders(urlString, results);
 
-    // Superficial Checks based on URL
-
-    // A01: Broken Access Control -> Check if URL contains admin, config, backup, .git, /.env
-    const a01Keywords = ['admin', 'config', 'backup', '.git', '.env'];
-    if (a01Keywords.some(kw => urlLower.includes(kw))) {
-        results[0].status = 'Possible Issue';
-    }
-
-    // A02: Cryptographic Failures -> Check if site loads over HTTP
-    if (url.protocol === 'http:') {
-        results[1].status = 'Possible Issue';
-    }
-
-    // A03: Injection -> Check URL parameters for ?, =, or input forms presence
-    if (url.search.includes('?') || url.search.includes('=')) {
-        results[2].status = 'Possible Issue';
-    }
-
-    // A06: Vulnerable Components -> Check URL path for /wp-admin, /vendor/, /node_modules
-    const a06Keywords = ['/wp-admin', '/vendor/', '/node_modules'];
-    if (a06Keywords.some(kw => pathLower.includes(kw))) {
-        results[5].status = 'Possible Issue';
-    }
-
-    // A07: Identification & Auth Failures -> Check for /login, /signin, /auth endpoints
-    const a07Keywords = ['/login', '/signin', '/auth'];
-    if (a07Keywords.some(kw => pathLower.includes(kw))) {
-        results[6].status = 'Possible Issue'; 
-    }
-
-    // A10: SSRF -> Check if URL has fetch, proxy, url=, path= parameters
-    const a10Keywords = ['fetch', 'proxy', 'url=', 'path='];
-    if (a10Keywords.some(kw => urlLower.includes(kw))) {
-        results[9].status = 'Possible Issue';
-    }
-
-    // Try fetching the page for headers (A04, A05, A08, A09)
+    // 3. DOM Heuristics (Message Content Script)
     try {
-        // Use a timeout of 3 seconds
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-        // Fetching just HEAD to get headers without downloading full body
-        const response = await fetch(urlString, { 
-            method: 'HEAD', 
-            mode: 'no-cors', 
-            signal: controller.signal 
-        });
-        clearTimeout(timeoutId);
-
-        // If no-cors, response.type will be 'opaque' and we can't read headers.
-        if (response.type === 'opaque') {
-            results[3].status = 'Check Manually'; // A04
-            results[4].status = 'Check Manually'; // A05
-            results[7].status = 'Check Manually'; // A08
-            results[8].status = 'Check Manually'; // A09
-        } else {
-            // We can read headers!
-            const headers = response.headers;
-            
-            // A04: Insecure Design -> Check if common headers missing (X-Frame-Options, CSP)
-            if (!headers.has('X-Frame-Options') && !headers.has('Content-Security-Policy')) {
-                results[3].status = 'Possible Issue';
-            }
-
-            // A05: Security Misconfiguration -> Check for Server version exposure
-            if (headers.has('Server') || headers.has('X-Powered-By')) {
-                results[4].status = 'Possible Issue';
-            }
-
-            // A08: Software & Data Integrity
-            results[7].status = 'Check Manually';
-
-            // A09: Security Logging & Monitoring
-            results[8].status = 'Check Manually';
+        const domResponse = await chrome.tabs.sendMessage(tabId, { action: 'analyze_dom' });
+        if (domResponse && domResponse.domFindings) {
+            domResponse.domFindings.forEach(finding => {
+                const target = results.find(r => r.id === finding.type);
+                if (target) {
+                    target.status = 'Possible Issue';
+                    if (!target.details.includes(finding.message)) {
+                        target.details.push(finding.message);
+                    }
+                }
+            });
         }
-
     } catch (e) {
-        // If page unreachable -> mark all as "Check Manually"
-        return generateFallbackResults();
+        // Content script might not be injected yet
     }
 
-    return results;
+    // Tally issues
+    results.forEach(r => {
+        if (r.status === 'Possible Issue' || r.status === 'Check Manually') {
+            issueCount++;
+        }
+    });
+
+    // Save to memory
+    tabResults[tabId] = { url: urlString, results: results, timestamp: Date.now() };
+    
+    // Update Extension Badge Autonomously
+    if (issueCount > 0) {
+        chrome.action.setBadgeText({ text: issueCount.toString(), tabId: tabId });
+        chrome.action.setBadgeBackgroundColor({ color: '#ef4444', tabId: tabId });
+    } else {
+        chrome.action.setBadgeText({ text: '✓', tabId: tabId });
+        chrome.action.setBadgeBackgroundColor({ color: '#22c55e', tabId: tabId });
+    }
 }
 
-function generateFallbackResults() {
+function initializeResults() {
     return [
-        { id: 'A01', name: 'Broken Access Control', status: 'Check Manually' },
-        { id: 'A02', name: 'Cryptographic Failures', status: 'Check Manually' },
-        { id: 'A03', name: 'Injection', status: 'Check Manually' },
-        { id: 'A04', name: 'Insecure Design', status: 'Check Manually' },
-        { id: 'A05', name: 'Security Misconfiguration', status: 'Check Manually' },
-        { id: 'A06', name: 'Vulnerable Components', status: 'Check Manually' },
-        { id: 'A07', name: 'Ident. & Auth Failures', status: 'Check Manually' },
-        { id: 'A08', name: 'Software & Data Integrity', status: 'Check Manually' },
-        { id: 'A09', name: 'Security Logging', status: 'Check Manually' },
-        { id: 'A10', name: 'SSRF', status: 'Check Manually' }
+        { id: 'A01', name: 'Broken Access Control', status: 'Likely Safe', details: [] },
+        { id: 'A02', name: 'Cryptographic Failures', status: 'Likely Safe', details: [] },
+        { id: 'A03', name: 'Injection', status: 'Likely Safe', details: [] },
+        { id: 'A04', name: 'Insecure Design', status: 'Likely Safe', details: [] },
+        { id: 'A05', name: 'Security Misconfiguration', status: 'Likely Safe', details: [] },
+        { id: 'A06', name: 'Vulnerable Components', status: 'Likely Safe', details: [] },
+        { id: 'A07', name: 'Ident. & Auth Failures', status: 'Likely Safe', details: [] },
+        { id: 'A08', name: 'Software & Data Integrity', status: 'Likely Safe', details: [] },
+        { id: 'A09', name: 'Security Logging', status: 'Likely Safe', details: [] },
+        { id: 'A10', name: 'SSRF', status: 'Likely Safe', details: [] }
     ];
+}
+
+function analyzeUrl(url, results) {
+    const urlLower = url.href.toLowerCase();
+    const pathLower = url.pathname.toLowerCase();
+    const searchLower = url.search.toLowerCase();
+
+    // A01
+    if (['admin', 'config', 'backup', '.git', '.env', 'api/users'].some(kw => pathLower.includes(kw))) {
+        results[0].status = 'Possible Issue';
+        results[0].details.push('Sensitive keywords found in URL path.');
+    }
+    if (searchLower.includes('id=') || searchLower.includes('user=')) {
+         results[0].status = 'Possible Issue';
+         results[0].details.push('Direct object reference pattern in URL parameters (IDOR risk).');
+    }
+
+    // A02
+    if (url.protocol === 'http:') {
+        results[1].status = 'Possible Issue';
+        results[1].details.push('Site loads over unencrypted HTTP.');
+    }
+
+    // A03
+    if (['select', 'union', '<script>', 'javascript:'].some(kw => searchLower.includes(kw))) {
+        results[2].status = 'Possible Issue';
+        results[2].details.push('Suspicious injection patterns detected in URL.');
+    } else if (searchLower.includes('=')) {
+        results[2].status = 'Check Manually';
+        results[2].details.push('URL contains parameters. Manual validation of input sanitization recommended.');
+    }
+
+    // A06
+    if (['/wp-admin', '/vendor/', '/node_modules', '.php'].some(kw => pathLower.includes(kw))) {
+        results[5].status = 'Possible Issue';
+        results[5].details.push('Indicator of potentially outdated technology stack in path.');
+    }
+
+    // A07
+    if (['/login', '/signin', '/auth', 'jwt='].some(kw => urlLower.includes(kw))) {
+        results[6].status = 'Check Manually'; 
+        results[6].details.push('Authentication endpoint detected. Verify mechanisms manually.');
+    }
+
+    // A10
+    if (['fetch=', 'proxy=', 'url=', 'path=', 'redirect=', 'uri='].some(kw => searchLower.includes(kw))) {
+        results[9].status = 'Possible Issue';
+        results[9].details.push('SSRF prone parameters detected in URL.');
+    }
+}
+
+async function analyzeHeaders(urlString, results) {
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000); // Fast timeout for autonomy
+        const response = await fetch(urlString, { method: 'HEAD', mode: 'no-cors', signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (response.type !== 'opaque') {
+            const headers = response.headers;
+            
+            // A04
+            if (!headers.has('X-Frame-Options') && !headers.has('Content-Security-Policy')) {
+                results[3].status = 'Possible Issue';
+                results[3].details.push('Missing protective headers (CSP, X-Frame-Options).');
+            }
+
+            // A05
+            if (headers.has('Server') || headers.has('X-Powered-By')) {
+                results[4].status = 'Possible Issue';
+                results[4].details.push('Server version or technology exposed in headers.');
+            }
+
+            // A02 (HSTS)
+            if (urlString.startsWith('https') && !headers.has('Strict-Transport-Security')) {
+                results[1].status = 'Possible Issue';
+                results[1].details.push('Missing HSTS header on HTTPS connection.');
+            }
+        }
+    } catch (e) {
+        // network error, ignore for passive checks
+    }
+}
+
+// API to popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'get_current_results') {
+        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+            const tabId = tabs[0].id;
+            if (tabResults[tabId]) {
+                sendResponse(tabResults[tabId]);
+            } else {
+                sendResponse({ error: 'No scan results yet' });
+            }
+        });
+        return true; 
+    }
+    
+    if (request.action === 'ai_analyze') {
+        const apiKey = request.apiKey;
+        const data = request.data;
+        
+        callAI(apiKey, data).then(aiResponse => {
+            sendResponse({ ai_insight: aiResponse });
+        }).catch(err => {
+            sendResponse({ error: err.message });
+        });
+        return true;
+    }
+});
+
+async function callAI(apiKey, scanData) {
+    if (!apiKey) return "Please provide a Google Gemini API key in the settings for AI analysis.";
+    
+    const formattedData = scanData.results.filter(r => r.status !== 'Likely Safe').map(r => `${r.name}: ${r.details.join(', ')}`);
+    const prompt = `You are an expert web security analyst. I ran a passive scanner on ${scanData.url}. Here are the findings: ${formattedData.length > 0 ? formattedData.join(' | ') : 'No obvious issues found.'}. Provide a concise, 3-sentence executive summary of the risk level and the most critical next step. Keep it professional.`;
+
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        });
+        
+        const json = await response.json();
+        if (json.error) return `AI Error: ${json.error.message}`;
+        if (json.candidates && json.candidates[0]) {
+            return json.candidates[0].content.parts[0].text;
+        }
+        return "AI analysis failed to generate a response.";
+    } catch (e) {
+        return `Connection to AI service failed: ${e.message}`;
+    }
 }
