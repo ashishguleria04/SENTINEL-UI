@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTINEL - UI</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <img src="icons/icon.svg" alt="Sentinel Logo" class="logo">
+            <h1>SENTINEL</h1>
+        </header>
+
+        <main>
+            <div class="input-group">
+                <input type="url" id="url-input" placeholder="Enter URL to scan..." required>
+                <div class="button-group">
+                    <button id="scan-btn" class="primary-btn">Scan</button>
+                    <button id="clear-btn" class="secondary-btn">Clear</button>
+                </div>
+            </div>
+
+            <div id="loading" class="hidden">
+                <div class="spinner"></div>
+                <p>Scanning URL...</p>
+            </div>
+
+            <div id="results" class="hidden">
+                <div class="scanned-url-display">
+                    <span>Scanned:</span> <span id="current-scanned-url"></span>
+                </div>
+                <ul id="vulnerability-list">
+                    <!-- Results injected here -->
+                </ul>
+            </div>
+        </main>
+
+        <footer>
+            <p>Superficial scan only — not a penetration test</p>
+        </footer>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
