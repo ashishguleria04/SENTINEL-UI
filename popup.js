@@ -19,11 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentScanData = null;
 
-    // Load API Key
+    // Fast load API Key
     chrome.storage.local.get(['geminiApiKey'], (data) => {
-        if (data.geminiApiKey) {
-            aiKeyInput.value = data.geminiApiKey;
-        }
+        if (data.geminiApiKey) aiKeyInput.value = data.geminiApiKey;
     });
 
     // View Toggling
@@ -39,12 +37,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     saveSettingsBtn.addEventListener('click', () => {
         chrome.storage.local.set({ geminiApiKey: aiKeyInput.value.trim() }, () => {
-            saveSettingsBtn.textContent = 'Saved!';
-            setTimeout(() => { saveSettingsBtn.textContent = 'Save'; }, 1500);
+            saveSettingsBtn.textContent = 'SAVED';
+            setTimeout(() => { saveSettingsBtn.textContent = 'SAVE'; }, 1500);
         });
     });
 
-    // Fetch Autonomous Results
+    // Fetch Autonomous Results Immediately (High Speed)
     chrome.runtime.sendMessage({ action: 'get_current_results' }, (response) => {
         statusBanner.classList.add('hidden');
         
@@ -62,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         chrome.storage.local.get(['geminiApiKey'], (data) => {
             aiAnalyzeBtn.disabled = true;
-            aiAnalyzeBtn.textContent = '✨ Analyzing...';
+            aiAnalyzeBtn.textContent = 'INITIATING AI UPLINK...';
             
             chrome.runtime.sendMessage({
                 action: 'ai_analyze',
@@ -70,53 +68,71 @@ document.addEventListener('DOMContentLoaded', () => {
                 data: currentScanData
             }, (response) => {
                 aiAnalyzeBtn.disabled = false;
-                aiAnalyzeBtn.textContent = '✨ Regenerate Insights';
+                aiAnalyzeBtn.textContent = 'REGENERATE INSIGHTS';
                 aiInsightBox.classList.remove('hidden');
                 
                 if (response && response.ai_insight) {
-                    aiInsightText.textContent = response.ai_insight;
+                    typeWriterEffect(aiInsightText, response.ai_insight);
                 } else if (response && response.error) {
-                    aiInsightText.textContent = response.error;
+                    aiInsightText.textContent = 'ERROR: ' + response.error;
                 } else {
-                    aiInsightText.textContent = 'Failed to generate insights.';
+                    aiInsightText.textContent = 'ERR: UPLINK FAILED.';
                 }
             });
         });
     });
 
+    function typeWriterEffect(element, text) {
+        element.textContent = '';
+        let i = 0;
+        function type() {
+            if (i < text.length) {
+                element.textContent += text.charAt(i);
+                i++;
+                setTimeout(type, 10); // Fast typing
+            }
+        }
+        type();
+    }
+
     function renderResults(results, url) {
-        currentScannedUrl.textContent = new URL(url).hostname;
+        currentScannedUrl.textContent = `TARGET: ${new URL(url).hostname}`;
         vulnList.innerHTML = '';
         
-        // Sort: Issues first
+        // Sort: CRIT > WARN > SAFE
         const sortedResults = results.sort((a, b) => {
             if (a.status === 'Likely Safe' && b.status !== 'Likely Safe') return 1;
             if (a.status !== 'Likely Safe' && b.status === 'Likely Safe') return -1;
+            if (a.status === 'Check Manually' && b.status === 'Possible Issue') return -1;
+            if (a.status === 'Possible Issue' && b.status === 'Check Manually') return 1;
             return 0;
         });
+
+        // Fast DOM fragment injection
+        const fragment = document.createDocumentFragment();
 
         sortedResults.forEach(res => {
             const li = document.createElement('li');
             
-            let statusIcon = '🟢';
+            let statusPrefix = '[ OK ]';
             let statusClass = 'status-safe';
-            let statusText = 'Likely Safe';
+            let statusText = 'SAFE';
 
             if (res.status === 'Possible Issue') {
-                statusIcon = '🟡';
+                statusPrefix = '[WARN]';
                 statusClass = 'status-warning';
-                statusText = 'Possible Issue';
+                statusText = 'WARN';
             } else if (res.status === 'Check Manually') {
-                statusIcon = '🔴';
+                statusPrefix = '[FAIL]';
                 statusClass = 'status-danger';
-                statusText = 'Check Manually';
+                statusText = 'CRIT';
             }
 
             let detailsHtml = '';
             if (res.details && res.details.length > 0) {
                 detailsHtml = `<div class="details-box">`;
                 res.details.forEach(d => {
-                    detailsHtml += `<p>• ${d}</p>`;
+                    detailsHtml += `<p>> ${d}</p>`;
                 });
                 detailsHtml += `</div>`;
             }
@@ -128,14 +144,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="vuln-name">${res.name}</span>
                     </div>
                     <div class="status-indicator ${statusClass}">
-                        <span>${statusIcon}</span> ${statusText}
+                        <span>${statusPrefix}</span> ${statusText}
                     </div>
                 </div>
                 ${detailsHtml}
             `;
-            vulnList.appendChild(li);
+            fragment.appendChild(li);
         });
 
+        vulnList.appendChild(fragment);
         resultsDiv.classList.remove('hidden');
     }
 });

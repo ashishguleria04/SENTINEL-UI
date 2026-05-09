@@ -128,7 +128,7 @@ function analyzeUrl(url, results) {
 async function analyzeHeaders(urlString, results) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000); // Fast timeout for autonomy
+        const timeoutId = setTimeout(() => controller.abort(), 800); // Super fast timeout for autonomy
         const response = await fetch(urlString, { method: 'HEAD', mode: 'no-cors', signal: controller.signal });
         clearTimeout(timeoutId);
 
