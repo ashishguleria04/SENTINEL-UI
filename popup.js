@@ -111,8 +111,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Fast DOM fragment injection
         const fragment = document.createDocumentFragment();
 
-        sortedResults.forEach(res => {
+        sortedResults.forEach((res, index) => {
             const li = document.createElement('li');
+            li.style.animationDelay = `${index * 0.1}s`;
             
             let statusPrefix = '[ OK ]';
             let statusClass = 'status-safe';
